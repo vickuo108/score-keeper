@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#8A5A44">
+<link rel="manifest" href="manifest.json">
+<title>記分簿</title>
+<style>
+:root{--bg:#F6F1E9;--card:#fff;--ink:#3a2e28;--sub:#8b7d73;--accent:#8A5A44;--line:#e8dfd3;--ok:#5b8a5a;--bad:#b4533f}
+@media (prefers-color-scheme:dark){:root{--bg:#1d1916;--card:#2a2420;--ink:#f1e8de;--sub:#a89a8e;--accent:#d29a7e;--line:#3d342d;--ok:#8fc08d;--bad:#e08a76}}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 -apple-system,"PingFang TC",sans-serif;padding-bottom:calc(76px + env(safe-area-inset-bottom))}
+header{position:sticky;top:0;z-index:5;background:var(--bg);padding:14px 16px 8px;border-bottom:1px solid var(--line)}
+h1{font-size:18px;margin:0 0 8px}
+.totals{display:flex;flex-wrap:wrap;gap:6px}
+.chip{background:var(--card);border:1px solid var(--line);border-radius:999px;padding:3px 11px;font-size:14px}
+.chip b{color:var(--accent);font-size:16px}
+.chip.zero{opacity:.45}
+main{padding:12px 16px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.btn-rule{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 10px;text-align:left;color:var(--ink);font:inherit;min-height:74px;display:flex;flex-direction:column;justify-content:space-between}
+.btn-rule:active{transform:scale(.97);background:var(--line)}
+.btn-rule small{color:var(--sub);font-size:13px}
+.btn-rule .n{font-weight:600}
+.row{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px;margin-bottom:10px}
+.row .top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.row input,.row select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:6px 8px;width:100%}
+.act{display:flex;gap:8px;margin-top:8px;align-items:center}
+.act input{width:80px}
+button.p{background:var(--accent);color:#fff;border:0;border-radius:10px;padding:8px 14px;font:inherit}
+button.g{background:transparent;color:var(--bad);border:1px solid var(--line);border-radius:10px;padding:6px 10px;font:inherit}
+.log{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--line);gap:8px}
+.log .d{color:var(--sub);font-size:13px}
+.add{color:var(--bad);font-weight:600}.done{color:var(--ok);font-weight:600}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;padding:14px 0;background:none;border:0;color:var(--sub);font:inherit}
+nav button.on{color:var(--accent);font-weight:600}
+#toast{position:fixed;left:16px;right:16px;bottom:calc(78px + env(safe-area-inset-bottom));background:var(--ink);color:var(--bg);border-radius:12px;padding:10px 14px;display:none;justify-content:space-between;align-items:center;z-index:9}
+#toast button{background:none;border:0;color:var(--bg);text-decoration:underline;font:inherit}
+h2{font-size:15px;color:var(--sub);margin:18px 0 8px}
+.hint{color:var(--sub);font-size:13px}
+</style>
+</head>
+<body>
+<header><h1>記分簿</h1><div class="totals" id="totals"></div></header>
+<main id="main"></main>
+<div id="toast"><span id="toastMsg"></span><button id="toastUndo">復原</button></div>
+<nav id="nav">
+  <button data-t="home" class="on">記一筆</button>
+  <button data-t="settle">結算</button>
+  <button data-t="log">紀錄</button>
+  <button data-t="set">設定</button>
+</nav>
+<script>
+const KEY='score-keeper-v1';
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+function seed(){
+  const tools=[{name:'充電線',unit:'下'},{name:'梳子',unit:'下'},{name:'衣架',unit:'下'},{name:'尺',unit:'下'},{name:'皮帶',unit:'下'},{name:'摸 20 分鐘 + 幫忙',unit:'次'},{name:'獎勵 ❤️',unit:'次'}];
+  const R=(name,tool,amount)=>({id:uid(),name,tool,amount});
+  const rules=[
+    R('垃圾不丟','充電線',10),R('東西亂丟','梳子',100),R('關燈滑手機','梳子',200),
+    R('無緣無故搔癢（腋下、腰）','摸 20 分鐘 + 幫忙',1),R('無緣無故咬','摸 20 分鐘 + 幫忙',1),
+    R('不該種 🍓 時種 🍓','衣架',5),R('不按時吃飯','衣架',10),R('5 天走超過一萬步','獎勵 ❤️',1),
+    R('翹課、遲到一堂','尺',20),R('每週去健身房三天','獎勵 ❤️',1),R('說到沒做到','皮帶',10),
+    R('作業沒寫或熬夜','衣架',5),R('自卑、沒自信','衣架',5),R('不愛惜自己身體','充電線',20)
+  ];
+  const ts=Date.now();
+  const open=[['充電線',20],['梳子',200],['衣架',30],['皮帶',10]].map(([t,a])=>({id:uid(),ts,kind:'add',name:'起始匯入',tool:t,amount:a}));
+  return {tools,rules,log:open};
+}
+let S;
+try{S=JSON.parse(localStorage.getItem(KEY))}catch(e){}
+if(!S||!S.rules)S=seed();
+const save=()=>{try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}};
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const unit=t=>(S.tools.find(x=>x.name===t)||{}).unit||'';
+function bal(){const b={};S.tools.forEach(t=>b[t.name]=0);S.log.forEach(l=>{if(l.tool in b)b[l.tool]+=l.kind==='add'?l.amount:-l.amount});return b}
+const main=document.getElementById('main');
+let tab='home',toastTimer,lastId=null;
+
+function renderTotals(){
+  const b=bal();
+  document.getElementById('totals').innerHTML=S.tools.map(t=>`<span class="chip ${b[t.name]<=0?'zero':''}">${esc(t.name)} <b>${b[t.name]}</b>${esc(t.unit)}</span>`).join('');
+}
+function fmt(ts){const d=new Date(ts);return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`}
+function toast(msg,id){
+  lastId=id;document.getElementById('toastMsg').textContent=msg;
+  const t=document.getElementById('toast');t.style.display='flex';
+  clearTimeout(toastTimer);toastTimer=setTimeout(()=>t.style.display='none',4000);
+}
+document.getElementById('toastUndo').onclick=()=>{
+  if(lastId){S.log=S.log.filter(l=>l.id!==lastId);save();lastId=null}
+  document.getElementById('toast').style.display='none';render();
+};
+function addLog(kind,rule,amount,tool,name){
+  const e={id:uid(),ts:Date.now(),kind,name:name||rule.name,tool:tool||rule.tool,amount:amount};
+  S.log.push(e);save();return e;
+}
+function render(){
+  renderTotals();
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.t===tab));
+  if(tab==='home')home();else if(tab==='settle')settle();else if(tab==='log')logView();else setView();
+}
+function home(){
+  main.innerHTML='<div class="grid">'+S.rules.map(r=>`<button class="btn-rule" data-id="${r.id}"><span class="n">${esc(r.name)}</span><small>${esc(r.tool)} ${r.amount}${esc(unit(r.tool))}</small></button>`).join('')+'</div>';
+  main.querySelectorAll('.btn-rule').forEach(b=>b.onclick=()=>{
+    const r=S.rules.find(x=>x.id===b.dataset.id);
+    const e=addLog('add',r,r.amount);
+    if(navigator.vibrate)navigator.vibrate(20);
+    toast(`已記：${r.name}（${r.tool} +${r.amount}）`,e.id);
+    renderTotals();
+  });
+}
+function settle(){
+  const b=bal();
+  main.innerHTML='<p class="hint">做完幾下就填幾下，按「已執行」會從帳上扣掉，剩下的留著。</p>'+S.tools.map(t=>`<div class="row"><div class="top"><b>${esc(t.name)}</b><span>剩 <b>${b[t.name]}</b> ${esc(t.unit)}</span></div><div class="act"><input type="number" min="1" inputmode="numeric" value="${b[t.name]>0?b[t.name]:''}" data-t="${esc(t.name)}"><span>${esc(t.unit)}</span><button class="p" data-t="${esc(t.name)}">已執行</button></div></div>`).join('');
+  main.querySelectorAll('button.p').forEach(btn=>btn.onclick=()=>{
+    const name=btn.dataset.t;
+    const inp=main.querySelector(`input[data-t="${CSS.escape(name)}"]`);
+    let n=Math.floor(Number(inp.value));
+    const cur=bal()[name];
+    if(!n||n<1||cur<=0)return;
+    n=Math.min(n,cur);
+    const e=addLog('done',null,n,name,'已執行');
+    toast(`已扣：${name} −${n}`,e.id);render();
+  });
+}
+function logView(){
+  const items=[...S.log].reverse();
+  main.innerHTML=items.length?items.map(l=>`<div class="log"><div><div>${esc(l.name)}</div><div class="d">${fmt(l.ts)} · ${esc(l.tool)}</div></div><div style="display:flex;gap:10px;align-items:center"><span class="${l.kind}">${l.kind==='add'?'+':'−'}${l.amount}${esc(unit(l.tool))}</span><button class="g" data-id="${l.id}">刪</button></div></div>`).join(''):'<p class="hint">還沒有紀錄</p>';
+  main.querySelectorAll('button.g').forEach(b=>b.onclick=()=>{
+    if(!confirm('刪除這筆紀錄？'))return;
+    S.log=S.log.filter(l=>l.id!==b.dataset.id);save();render();
+  });
+}
+function setView(){
+  const opts=sel=>S.tools.map(t=>`<option ${t.name===sel?'selected':''}>${esc(t.name)}</option>`).join('');
+  main.innerHTML='<h2>規則</h2>'+S.rules.map(r=>`<div class="row" data-id="${r.id}"><input class="rn" value="${esc(r.name)}"><div class="act"><select class="rt">${opts(r.tool)}</select><input class="ra" type="number" min="1" value="${r.amount}"><button class="g del">刪</button></div></div>`).join('')+
+  '<button class="p" id="addRule">＋ 新增規則</button>'+
+  '<h2>道具 / 單位</h2>'+S.tools.map((t,i)=>`<div class="row"><div class="act" style="margin:0"><input class="tn" data-i="${i}" value="${esc(t.name)}"><input class="tu" data-i="${i}" value="${esc(t.unit)}" style="width:70px"></div></div>`).join('')+
+  '<button class="p" id="addTool">＋ 新增道具</button>'+
+  '<h2>備份</h2><div class="act"><button class="p" id="exp">匯出</button><button class="p" id="imp">匯入</button></div><p class="hint">資料只存在這支手機的瀏覽器，換手機或清除網站資料前請先匯出備份。</p>';
+  main.querySelectorAll('.row[data-id]').forEach(row=>{
+    const r=S.rules.find(x=>x.id===row.dataset.id);
+    row.querySelector('.rn').onchange=e=>{r.name=e.target.value.trim()||r.name;save()};
+    row.querySelector('.rt').onchange=e=>{r.tool=e.target.value;save()};
+    row.querySelector('.ra').onchange=e=>{r.amount=Math.max(1,Math.floor(Number(e.target.value))||1);save()};
+    row.querySelector('.del').onclick=()=>{if(confirm('刪除這條規則？（已記的紀錄不受影響）')){S.rules=S.rules.filter(x=>x!==r);save();render()}};
+  });
+  main.querySelectorAll('.tn').forEach(inp=>inp.onchange=e=>{
+    const t=S.tools[+inp.dataset.i],nv=e.target.value.trim();if(!nv||S.tools.some(x=>x!==t&&x.name===nv)){render();return}
+    S.rules.forEach(r=>{if(r.tool===t.name)r.tool=nv});S.log.forEach(l=>{if(l.tool===t.name)l.tool=nv});t.name=nv;save();render();
+  });
+  main.querySelectorAll('.tu').forEach(inp=>inp.onchange=e=>{S.tools[+inp.dataset.i].unit=e.target.value;save();render()});
+  document.getElementById('addRule').onclick=()=>{S.rules.push({id:uid(),name:'新規則',tool:S.tools[0].name,amount:1});save();render()};
+  document.getElementById('addTool').onclick=()=>{const n=prompt('道具名稱？');if(n&&!S.tools.some(t=>t.name===n.trim())){S.tools.push({name:n.trim(),unit:'下'});save();render()}};
+  document.getElementById('exp').onclick=()=>{
+    const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(S,null,2)],{type:'application/json'}));
+    a.download='score-keeper-'+new Date().toISOString().slice(0,10)+'.json';a.click();
+  };
+  document.getElementById('imp').onclick=()=>{
+    const f=document.createElement('input');f.type='file';f.accept='application/json';
+    f.onchange=()=>f.files[0].text().then(t=>{try{const d=JSON.parse(t);if(!d.rules||!d.tools||!d.log)throw 0;if(confirm('匯入會取代目前所有資料，確定？')){S=d;save();render()}}catch(e){alert('檔案格式不對')}});
+    f.click();
+  };
+}
+document.getElementById('nav').onclick=e=>{const t=e.target.dataset.t;if(t){tab=t;render()}};
+if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
+render();
+</script>
+</body>
+</html>
